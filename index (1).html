@@ -1,0 +1,797 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>蔡徐坤机场 - 智能线路检测</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // 管理员在这里填背景图 URL（仅支持 http/https）
+        // 示例：window.BG_IMAGE_URL = "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee";
+        window.BG_IMAGE_URL = "https://image.dooo.ng/t/2026/03/12/69b2727c3e36e.webp";
+        window.BG_OVERLAY_OPACITY = 0.45; // 0~1，越大越暗
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+
+        /* 动态背景（支持 URL 自定义） */
+        :root {
+            --custom-bg-image: none;
+            --bg-overlay-opacity: .45;
+        }
+
+        .bg-glow {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%; z-index: -1;
+            background-image:
+                linear-gradient(rgba(3, 7, 18, var(--bg-overlay-opacity)), rgba(3, 7, 18, var(--bg-overlay-opacity))),
+                var(--custom-bg-image),
+                radial-gradient(circle at 50% 0%, #1e1b4b 0%, #0f172a 60%);
+            background-size: cover, cover, auto;
+            background-position: center, center, center;
+            background-repeat: no-repeat;
+        }
+        .blob {
+            position: absolute;
+            filter: blur(90px); opacity: 0.5; animation: move 20s infinite alternate;
+        }
+        @keyframes move {
+            0% { transform: translate(0, 0);
+            } 100% { transform: translate(50px, 30px); }
+        }
+        
+        /* 玻璃卡片 */
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.4);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            transition: all 0.2s ease;
+        }
+
+        /* 线路卡片 */
+        .node-card {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); 
+            cursor: pointer; position: relative; overflow: hidden;
+        }
+        .node-card:hover {
+            background: rgba(51, 65, 85, 0.8);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px); 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .node-card.fastest { 
+            border-color: #22c55e;
+            box-shadow: 0 0 15px rgba(34, 197, 94, 0.15);
+        }
+        .node-card.offline { border-color: #ef4444;
+            opacity: 0.7; }
+
+        /* 域名卡片 */
+        .domain-card {
+            background: rgba(30, 41, 59, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1); transition: all 0.2s;
+        }
+        .domain-card:hover {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: rgba(59, 130, 246, 0.4); transform: translateY(-2px);
+        }
+
+        /* 动画与状态色 */
+        .biz-btn {
+            background: linear-gradient(90deg, #ec4899, #8b5cf6);
+            background-size: 200% 200%; animation: gradientMove 3s ease infinite;
+        }
+        @keyframes gradientMove {
+            0% { background-position: 0% 50%;
+            } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%;
+            }
+        }
+
+        .ping-dot { width: 6px;
+            height: 6px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+        .status-fast { color: #4ade80;
+        } 
+        .status-med { color: #facc15;
+        } 
+        .status-slow { color: #f87171;
+        }
+        .status-offline { color: #94a3b8;
+        }
+
+        .timer-bar {
+            height: 2px;
+            background: #3b82f6; width: 100%; position: absolute; bottom: 0; left: 0;
+            transition: width 1s linear; opacity: 0.5;
+        }
+
+        /* Toast 提示框样式 */
+        .toast-container {
+            position: fixed;
+            bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: rgba(15, 23, 42, 0.95); border: 1px solid rgba(255,255,255,0.1);
+            color: white;
+            padding: 12px 24px; border-radius: 50px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            display: flex; align-items: center; gap: 10px; z-index: 100;
+            opacity: 0;
+            visibility: hidden; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .toast-container.show { opacity: 1;
+            visibility: visible; transform: translateX(-50%) translateY(0); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <div id="toast" class="toast-container">
+        <i class="fa-solid fa-circle-check text-green-400"></i>
+        <span id="toast-msg" class="text-sm font-medium">操作成功</span>
+    </div>
+
+    <div class="bg-glow">
+        <div class="blob bg-blue-900 w-96 h-96 top-0 left-0 rounded-full mix-blend-multiply"></div>
+        <div class="blob bg-purple-900 w-96 h-96 bottom-0 right-0 rounded-full mix-blend-multiply animation-delay-2000"></div>
+    </div>
+
+    <header class="w-full py-6 px-4">
+       
+        <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3 self-start md:self-auto">
+                <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
+                    <i class="fa-solid fa-cloud text-white text-lg"></i>
+                </div>
+       
+                <div>
+                    <h1 class="text-xl font-bold text-white tracking-wide">蔡徐坤机场</h1>
+                    <p class="text-xs text-slate-400">稳定 · 高速 · 安全</p>
+                </div>
+            </div>
+            
+            <div class="flex gap-2 self-end md:self-auto">
+                <button onclick="visitFastestNode()" class="text-xs bg-green-600/90 hover:bg-green-500 text-white px-4 py-2 rounded-md transition flex items-center gap-2 shadow-lg shadow-green-500/20 group">
+                    <i class="fa-solid fa-rocket group-hover:animate-bounce"></i> <span>一键直连最快</span>
+                </button>
+                
+         
+                <button onclick="checkAllNodes()" class="text-xs bg-blue-600/80 hover:bg-blue-500 text-white px-3 py-2 rounded-md transition flex items-center gap-2 shadow-lg shadow-blue-500/20">
+                    <i class="fa-solid fa-rotate" id="refresh-icon"></i> <span>立即检测</span>
+                </button>
+                <button onclick="toggleAutoRefresh()" id="auto-btn" class="text-xs bg-slate-800/80 hover:bg-slate-700 text-blue-300 px-3 py-2 rounded-md border border-slate-700 transition flex items-center gap-2">
+        
+                    <i class="fa-solid fa-pause"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow px-4 pb-12">
+        <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            
+            <div class="lg:col-span-9 flex flex-col gap-6">
+                <div class="glass-panel status-banner rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+                    <div class="flex items-center gap-4 w-full md:w-auto border-b md:border-b-0 border-slate-700/50 pb-4 md:pb-0">
+                        <div class="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0 transition-colors duration-300" id="status-icon-bg">
+   
+                            <i class="fa-solid fa-heart-pulse text-green-400 text-lg animate-pulse" id="status-icon"></i>
+                        </div>
+                        <div>
+                     
+                            <h3 class="text-base font-bold text-white" id="system-status-text">正在初始化...</h3>
+                            <div class="flex items-center gap-2 mt-1">
+                                <i class="fa-regular fa-clock text-blue-400 text-xs"></i>
+                     
+                                <p class="text-xs text-slate-400">
+                                    每 <span class="text-blue-400 font-bold font-mono">8</span> 秒自动检测 · <span id="next-check-text" class="text-slate-500">准备中</span>
+                                </p>
+          
+                        </div>
+                        </div>
+                    </div>
+
+                    <div class="flex w-full md:w-auto justify-around md:justify-end gap-6 md:gap-12">
+           
+                        <div class="flex flex-col items-center">
+                            <div class="text-2xl font-bold text-white" id="online-count">0</div>
+                            <div class="text-[11px] text-slate-500 uppercase tracking-wide mt-1">可用官网</div>
+                   
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <div class="text-2xl font-bold text-slate-400" id="avg-latency">--ms</div>
+                            <div class="text-[11px] text-slate-500 uppercase tracking-wide mt-1">平均延迟</div>
+   
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <div class="text-2xl font-bold text-blue-400" id="online-rate">0%</div>
+                    
+                            <div class="text-[11px] text-slate-500 uppercase tracking-wide mt-1">在线率</div>
+                        </div>
+                    </div>
+                    <div class="timer-bar" id="timer-bar"></div>
+                </div>
+
+     
+                <div class="flex-1 flex flex-col"> 
+                    <div class="flex items-center gap-2 mb-3 px-1">
+                        <i class="fa-solid fa-network-wired text-blue-400"></i>
+                        <h2 class="font-semibold text-white">官网线路选择</h2>
+       
+                        <span class="text-xs text-slate-500 ml-auto flex items-center gap-2">
+                            <i class="fa-solid fa-arrow-down-short-wide"></i> 自动检测
+                        </span>
+                    </div>
+  
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 h-full content-start" id="node-container">
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-3 flex flex-col gap-5">
+          
+                <div class="glass-panel rounded-xl p-1.5">
+                    <a href="https://t.me/IKUN2012" target="_blank" class="biz-btn w-full rounded-lg py-3 px-4 flex items-center justify-center gap-2 text-white font-bold shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition transform hover:scale-[1.02] active:scale-95">
+                        <i class="fa-solid fa-handshake-simple text-xl"></i>
+                        
+                        <span>商务合作洽谈</span>
+                    </a>
+                </div>
+
+                <div class="glass-panel rounded-xl p-5" id="client-download-section">
+                    <h3 class="font-semibold text-white mb-4 text-sm flex items-center gap-2">
+                 
+                        <i class="fa-solid fa-download text-slate-400"></i> 客户端下载
+                    </h3>
+                    <div class="space-y-2.5">
+                        <a href="https://hk.gh-proxy.org/https://github.com/2dust/v2rayNG/releases/download/2.0.15/v2rayNG_2.0.15_x86_64.apk" target="_blank" class="flex items-center justify-between bg-slate-800/40 hover:bg-slate-700/60 border border-transparent hover:border-slate-600 rounded-lg px-4 py-2.5 transition group">
+         
+                            <div class="flex items-center gap-3">
+                                <i class="fa-brands fa-android text-green-400 text-lg"></i>
+                                <span class="text-sm text-slate-300 group-hover:text-white">Android</span>
+       
+                            </div>
+                            <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 group-hover:text-white"></i>
+                        </a>
+                      
+                        <a href="https://github.com" target="_blank" class="flex items-center justify-between bg-slate-800/40 hover:bg-slate-700/60 border border-transparent hover:border-slate-600 rounded-lg px-4 py-2.5 transition group">
+                            <div class="flex items-center gap-3">
+                                <i class="fa-brands fa-windows text-blue-400 text-lg"></i>
+                
+                                <span class="text-sm text-slate-300 group-hover:text-white">Windows</span>
+                            </div>
+                            <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 group-hover:text-white"></i>
+                    
+                        </a>
+                        <a href="https://play.google.com" target="_blank" class="flex items-center justify-between bg-slate-800/40 hover:bg-slate-700/60 border border-transparent hover:border-slate-600 rounded-lg px-4 py-2.5 transition group">
+                            <div class="flex items-center gap-3">
+                          
+                                <i class="fa-brands fa-apple text-slate-200 text-lg"></i>
+                                <span class="text-sm text-slate-300 group-hover:text-white">macOSiOS</span>
+                            </div>
+                         
+                            <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 group-hover:text-white"></i>
+                        </a>
+                        <a href="https://apps.apple.com/us/app/shadowrocket/id932747118" target="_blank" class="flex items-center justify-between bg-slate-800/40 hover:bg-slate-700/60 border border-transparent hover:border-slate-600 rounded-lg px-4 py-2.5 transition group">
+                            <div class="flex items-center gap-3">
+                          
+                                <i class="fa-brands fa-apple text-slate-200 text-lg"></i>
+                                <span class="text-sm text-slate-300 group-hover:text-white">iOS</span>
+                            </div>
+                         
+                            <i class="fa-solid fa-chevron-right text-[10px] text-slate-600 group-hover:text-white"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="glass-panel rounded-xl p-5">
+             
+                    <h3 class="font-semibold text-white mb-4 text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-users text-slate-400"></i> 官方社群
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3">
+               
+                        <a href="https://t.me/IKUN_2013" target="_blank" class="flex flex-col items-center justify-center gap-1 bg-[#229ED9]/10 hover:bg-[#229ED9] border border-[#229ED9]/20 text-[#229ED9] hover:text-white py-3 rounded-lg transition">
+                            <i class="fa-brands fa-telegram text-lg"></i>
+                            <span class="text-xs font-medium">官方群组</span>
+              
+                        </a>
+                        <a href="https://t.me/IKUN_2012" target="_blank" class="flex flex-col items-center justify-center gap-1 bg-[#229ED9]/10 hover:bg-[#229ED9] border border-[#229ED9]/20 text-[#229ED9] hover:text-white py-3 rounded-lg transition">
+                            <i class="fa-regular fa-paper-plane text-lg"></i>
+                   
+                            <span class="text-xs font-medium">频道订阅</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-12 mt-2">
+   
+                <div class="flex items-center gap-2 mb-3 px-1">
+                    <i class="fa-solid fa-shield-halved text-indigo-400"></i>
+                    <h2 class="font-semibold text-white">防失联发布页</h2>
+                    <span class="text-xs text-slate-500 ml-auto">建议收藏保存</span>
+              
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <a href="https://i-kun.ru" target="_blank" class="domain-card rounded-xl p-4 flex items-center justify-between group relative overflow-hidden release-link">
+                        <div class="flex items-center gap-3 z-10">
+                  
+                            <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 group-hover:text-white group-hover:bg-blue-500 transition">
+                                <i class="fa-solid fa-globe text-xl"></i>
+                            </div>
+                
+                            <div>
+                                <div class="font-bold text-white text-lg tracking-wide">i-kun.ru</div>
+                                <div class="text-xs text-slate-400 group-hover:text-blue-200 transition">点击进入发布页</div>
+                
+                            </div>
+                        </div>
+                        <button onclick="copyText(event, 'love.p6m6.com')" class="release-domain-copy-btn z-20 bg-slate-800 hover:bg-white hover:text-blue-600 text-slate-400 text-xs px-3 py-2 rounded-lg border border-slate-600 hover:border-white transition flex items-center gap-1">
+                     
+                            <i class="fa-regular fa-copy"></i> 复制
+                        </button>
+                    </a>
+                    <a href="https://i-kun.ru" target="_blank" class="domain-card rounded-xl p-4 flex items-center justify-between group relative overflow-hidden release-link">
+                        <div class="flex items-center gap-3 z-10">
+                            <div class="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400 group-hover:text-white group-hover:bg-purple-500 transition">
+                                <i class="fa-solid fa-globe text-xl"></i>
+            
+                            </div>
+                            <div>
+                                <div class="font-bold text-white text-lg tracking-wide">i-kun.ru</div>
+                                <div class="text-xs text-slate-400 group-hover:text-purple-200 transition">点击进入发布页</div>
+                            </div>
+                        </div>
+                        <button onclick="copyText(event, 'love.p6m6.com')" class="release-domain-copy-btn z-20 bg-slate-800 hover:bg-white hover:text-purple-600 text-slate-400 text-xs px-3 py-2 rounded-lg border border-slate-600 hover:border-white transition flex items-center gap-1">
+                            <i class="fa-regular fa-copy"></i> 复制
+                        </button>
+                    </a>
+              
+                    <a href="https://i-kun.ru" target="_blank" class="domain-card rounded-xl p-4 flex items-center justify-between group relative overflow-hidden release-link">
+                        <div class="flex items-center gap-3 z-10">
+                            <div class="w-10 h-10 rounded-lg bg-pink-500/20 flex items-center justify-center text-pink-400 group-hover:text-white group-hover:bg-pink-500 transition">
+               
+                                <i class="fa-solid fa-globe text-xl"></i>
+                            </div>
+                            <div>
+                                <div class="font-bold text-white text-lg tracking-wide">i-kun.ru</div>
+                                <div class="text-xs text-slate-400 group-hover:text-purple-200 transition">点击进入发布页</div>
+                            </div>
+                        
+                        </div>
+                        <button onclick="copyText(event, 'love.p6m6.com')" class="release-domain-copy-btn z-20 bg-slate-800 hover:bg-white hover:text-pink-600 text-slate-400 text-xs px-3 py-2 rounded-lg border border-slate-600 hover:border-white transition flex items-center gap-1">
+                            <i class="fa-regular fa-copy"></i> 复制
+                        </button>
+  
+                    </a>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <footer class="text-center py-8 border-t border-slate-800/50 mt-auto">
+        <p class="text-xs text-slate-600">© 2026 DragonZ.
+            真实延迟数据每 8 秒自动刷新</p>
+    </footer>
+
+    <script>
+        // ================= 配置区域 =================
+        const REFRESH_INTERVAL = 8000;
+        const TIMEOUT_MS = 3000;     
+        const STAGGER_DELAY = 100;     
+        
+        // 节点数据 (务必包含 history: []，否则会报错)
+        const nodes = [
+            { name: "官网线路 1", url: "https://ikun.xn--mesrd18zj9hr32b.com", history: [] },
+            { name: "官网线路 2", url: "https://ikun.xn--mesrd18zj9hr32b.com", history: [] },
+            { name: "官网线路 3", url: "https://ikun.xn--mesrd18zj9hr32b.com", history: [] },
+            { name: "官网线路 4", url: "https://ikun.xn--mesrd18zj9hr32b.com", history: [] },
+            { name: "官网线路 5", url: "https://ikun.xn--mesrd18zj9hr32b.com", history: [] },
+            { name: "官网线路 6", url: "https://ikun.xn--mesrd18zj9hr32b.com", history: [] },
+            { name: "官网线路 7", url: "https://ikun.xn--mesrd18zj9hr32b.com", history: [] },
+            { name: "官网线路 8", url: "https://ikun.xn--mesrd18zj9hr32b.com", history: [] }
+        ];
+        // ================= DOM 元素 =================
+        const container = document.getElementById('node-container');
+        const onlineCountEl = document.getElementById('online-count');
+        const avgLatencyEl = document.getElementById('avg-latency');
+        const onlineRateEl = document.getElementById('online-rate');
+        const statusIcon = document.getElementById('status-icon');
+        const statusIconBg = document.getElementById('status-icon-bg');
+        const systemStatusText = document.getElementById('system-status-text');
+        const timerBar = document.getElementById('timer-bar');
+        const refreshIcon = document.getElementById('refresh-icon');
+
+        // ================= 状态变量 =================
+        let autoRefresh = true;
+        let refreshTimer = null;
+        let currentStats = {
+            total: nodes.length,
+            completed: 0,
+            active: 0,
+            totalLatency: 0
+        };
+        let affiliateCode = null;
+
+        // ================= 初始化 =================
+        function initHtml() {
+            // 1. 获取 Code 参数
+            //const params = new URLSearchParams(window.location.search);
+            //affiliateCode = params.get('code');
+            affiliateCode = getAffiliateCode();
+            // 2. 严格判断：只有当 Code 存在时，才执行特定逻辑
+            if (affiliateCode) {
+                // 隐藏客户端下载区域
+                const dlSection = document.getElementById('client-download-section');
+                if (dlSection) dlSection.style.display = 'none';
+
+                // 处理发布页链接和复制按钮
+                const releaseLinks = document.querySelectorAll('.release-link');
+                releaseLinks.forEach(link => {
+                    // 修改 href: 增加 ?code=xxx
+                    let href = link.getAttribute('href');
+                    // 避免重复添加
+                    if (href && !href.includes('?code=')) {
+      
+                        link.setAttribute('href', `${href}?code=${affiliateCode}`);
+                    }
+
+                    // 修改复制按钮
+                    const btn = link.querySelector('button');
+                 
+                    // 我们从 href 获取链接更准确
+                    const linkUrl = link.getAttribute('href'); 
+                    if (btn && linkUrl) {
+                        // 提取原始域名显示在 Toast 中
+                   
+                        let displayDomain = linkUrl;
+                        try {
+                            const urlObj = new URL(linkUrl);
+                            displayDomain = urlObj.hostname;
+     
+                        } catch(e) {}
+                        
+                        // 必须把 copyText 调用包装成新的字符串
+                        btn.setAttribute('onclick', `copyText(event, '${linkUrl}')`);
+                    }
+                });
+            }
+
+            // 3. 生成线路卡片
+            let html = '';
+            nodes.forEach((node, index) => {
+                let i = index + 1;
+                
+                // 默认跳转地址 = 测速地址
+                let jumpUrl = node.url;
+                
+      
+// 严格判断：只有当 affiliateCode 存在时，才修改跳转地址为注册页
+if (affiliateCode) {
+    try {
+        const urlObj = new URL(node.url);
+        // ✅ 手动拼 hash 路由
+        jumpUrl = `${urlObj.origin}/#/register?code=${affiliateCode}`;
+    } catch (e) {
+        jumpUrl = node.url;
+    }
+} else {
+    jumpUrl = node.url;
+}
+
+
+
+
+                html += `
+                <a href="${jumpUrl}" target="_blank" class="node-card rounded-xl p-5 flex flex-col justify-between min-h-[110px] group relative" id="card-${index}" data-index="${index}" data-latency="9999">
+                    <div class="flex justify-between items-start z-10">
+              
+                        <span class="text-sm font-bold text-slate-400 group-hover:text-white transition">${node.name}</span>
+                        <i id="jitter-${index}" class="fa-solid fa-chart-line text-[10px] text-orange-400 opacity-0 transition" title="线路抖动检测"></i>
+                    </div>
+                    <div class="flex items-center gap-2 mt-3 z-10">
+        
+                        <div class="ping-dot bg-slate-600 transition-colors" id="dot-${index}"></div>
+                        <span class="font-mono text-base font-bold text-slate-500 transition-colors" id="text-${index}">等待检测...</span>
+                    </div>
+                    <div class="absolute -bottom-3 -right-1 text-5xl font-bold text-slate-800/40 select-none group-hover:text-slate-700/40 transition 
+pointer-events-none">${i}</div>
+                </a>`;
+            });
+            container.innerHTML = html;
+            
+            // 4. 启动自动检测
+            setTimeout(checkAllNodes, 500);
+        }
+        //跳转页面带路径跳转
+        function getAffiliateCode() {
+            // 情况 1：#/register?code=xxx
+            if (window.location.hash && window.location.hash.includes('?')) {
+                const hashQuery = window.location.hash.split('?')[1];
+                const hashParams = new URLSearchParams(hashQuery);
+                const codeFromHash = hashParams.get('code');
+            if (codeFromHash) return codeFromHash;
+        }
+
+            // 情况 2：?code=xxx
+            const searchParams = new URLSearchParams(window.location.search);
+            return searchParams.get('code');
+        }
+        // ================= 核心测速逻辑 =================
+        function checkAllNodes() {
+            if (refreshTimer) clearTimeout(refreshTimer);
+            refreshIcon.classList.add('fa-spin');
+            systemStatusText.innerText = "正在实时探测...";
+            
+            currentStats = { total: nodes.length, completed: 0, active: 0, totalLatency: 0 };
+            
+            timerBar.style.transition = 'none';
+            timerBar.style.width = '100%';
+            setTimeout(() => {
+                if(autoRefresh) {
+                    timerBar.style.transition = `width ${REFRESH_INTERVAL/1000}s linear`;
+                    timerBar.style.width = '0%';
+                }
+            }, 50);
+            nodes.forEach((node, index) => {
+                const card = document.getElementById(`card-${index}`);
+                const dot = document.getElementById(`dot-${index}`);
+                const text = document.getElementById(`text-${index}`);
+                
+                card.classList.remove('fastest', 'offline');
+       
+                text.innerText = "检测中...";
+                text.className = "font-mono text-sm font-bold text-slate-400";
+                dot.className = "ping-dot bg-slate-500 animate-pulse";
+                // 暂时重置延迟数据
+                card.setAttribute('data-latency', '8888');
+
+              
+                setTimeout(() => {
+                    checkSingleNode(node, index);
+                }, index * STAGGER_DELAY);
+            });
+        }
+
+        function checkSingleNode(node, index) {
+            const card = document.getElementById(`card-${index}`);
+            const dot = document.getElementById(`dot-${index}`);
+            const text = document.getElementById(`text-${index}`);
+            const jitterIcon = document.getElementById(`jitter-${index}`);
+
+            const startTime = performance.now();
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+            // 测速使用纯净的原始 URL (node.url)，不带任何参数，确保测速准确
+            // 为了防止缓存，添加时间戳
+            const targetUrl = `${node.url}/generate_204?t=${Date.now()}`;
+            fetch(targetUrl, { 
+                method: 'HEAD', 
+                mode: 'no-cors', 
+                cache: 'no-store',
+                credentials: 'include', 
+                signal: controller.signal 
+         
+            })
+            .then(() => {
+                clearTimeout(timeoutId);
+                const endTime = performance.now();
+                const latency = Math.round(endTime - startTime);
+                
+           
+                // 1. 记录历史并检测抖动
+                // 注意：如果 history 属性不存在会报错，请确保 nodes 数组中初始化了 history: []
+                node.history.push(latency);
+                if (node.history.length > 3) node.history.shift(); // 只保留最近3次
+
+                // 计算抖动
+               
+                if (node.history.length >= 2) {
+                    const prevLatency = node.history[node.history.length - 2];
+                    const change = Math.abs(latency - prevLatency) / prevLatency;
+                    if (change > 0.5) {
+                   
+                        jitterIcon.classList.remove('opacity-0'); // 显示抖动图标
+                        jitterIcon.classList.add('animate-pulse');
+                    } else {
+                        jitterIcon.classList.add('opacity-0');
+                        jitterIcon.classList.remove('animate-pulse');
+                    }
+                }
+
+                // 2. 更新 UI
+                text.innerText = latency + "ms";
+                card.setAttribute('data-latency', latency); 
+                
+                if(latency < 200) {
+                    text.className = "font-mono text-sm font-bold text-green-400 status-fast";
+                    dot.className = "ping-dot bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]";
+                    if(latency < 100) card.classList.add('fastest');
+                } else if (latency < 500) {
+                    text.className = "font-mono text-sm font-bold text-yellow-400 status-med";
+                    dot.className = "ping-dot bg-yellow-500";
+                } else {
+                    text.className = "font-mono text-sm font-bold text-red-400 status-slow";
+                    dot.className = "ping-dot bg-red-500";
+                }
+
+                currentStats.active++;
+                currentStats.totalLatency += latency;
+            })
+            .catch(() => {
+                text.innerText = "超时";
+                text.className = "font-mono text-sm font-bold text-slate-500 status-offline";
+                dot.className = "ping-dot bg-red-600";
+                card.classList.add('offline');
+        
+                card.setAttribute('data-latency', '9999'); 
+                
+                // 重置历史
+                node.history = []; 
+                jitterIcon.classList.add('opacity-0');
+            })
+          
+            .finally(() => {
+                currentStats.completed++;
+                updateHeaderStats();
+                
+                // 全部跑完
+                if(currentStats.completed === currentStats.total) {
+            
+                    refreshIcon.classList.remove('fa-spin');
+                    
+                    // 【已移除自动排序调用】
+                    // setTimeout(sortNodesByLatency, 800);
+
+                    if(autoRefresh) {
+        
+                        refreshTimer = setTimeout(checkAllNodes, REFRESH_INTERVAL);
+                    }
+                }
+            });
+        }
+
+        // ================= 自动排序功能 (已禁用) =================
+        function sortNodesByLatency() {
+            const cards = Array.from(container.children);
+            cards.sort((a, b) => {
+                const latA = parseInt(a.getAttribute('data-latency')) || 9999;
+                const latB = parseInt(b.getAttribute('data-latency')) || 9999;
+                return latA - latB;
+            });
+            cards.forEach(card => container.appendChild(card));
+        }
+
+        // ================= 一键直连 =================
+        function visitFastestNode() {
+            const cards = Array.from(container.children);
+            let bestCard = null;
+            let minLatency = 9999;
+
+            cards.forEach(card => {
+                const lat = parseInt(card.getAttribute('data-latency'));
+                if (lat < minLatency && lat > 0) {
+                    minLatency = lat;
+                    bestCard = card;
+   
+                }
+            });
+            if (bestCard && minLatency < 2000) {
+                const url = bestCard.getAttribute('href');
+                showToast(`🚀 正在前往最快节点 (${minLatency}ms)`);
+                setTimeout(() => {
+                    window.open(url, '_blank');
+                }, 1000);
+            } else {
+                showToast('⚠️ 暂无可用高速节点，请稍后');
+            }
+        }
+
+        // ================= 更新统计 =================
+        function updateHeaderStats() {
+            const count = currentStats.active;
+            const avg = count > 0 ? Math.round(currentStats.totalLatency / count) : 0;
+            const rate = Math.round((count / nodes.length) * 100);
+            onlineCountEl.innerText = count;
+            avgLatencyEl.innerText = count > 0 ? avg + "ms" : "N/A";
+            onlineRateEl.innerText = rate + "%";
+            if(avg < 100 && count > 0) avgLatencyEl.className = "text-2xl font-bold text-green-400";
+            else if (avg < 300 && count > 0) avgLatencyEl.className = "text-2xl font-bold text-yellow-400";
+            else avgLatencyEl.className = "text-2xl font-bold text-slate-400";
+            if(currentStats.completed === currentStats.total) {
+                if(count >= 10) {
+                    systemStatusText.innerText = "系统运行正常";
+                    statusIcon.className = "fa-solid fa-heart-pulse text-green-400 text-lg animate-pulse";
+                    statusIconBg.className = "w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center shrink-0";
+                } else if (count >= 5) {
+                    systemStatusText.innerText = "部分线路拥堵";
+                    statusIcon.className = "fa-solid fa-triangle-exclamation text-yellow-400 text-lg";
+                    statusIconBg.className = "w-10 h-10 rounded-full bg-yellow-500/10 flex items-center justify-center shrink-0";
+                } else {
+                    systemStatusText.innerText = "系统维护中";
+                    statusIcon.className = "fa-solid fa-skull text-red-500 text-lg";
+                    statusIconBg.className = "w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center shrink-0";
+                }
+            }
+        }
+
+        // ================= 辅助功能 =================
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            const msgEl = document.getElementById('toast-msg');
+            msgEl.innerText = msg;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        function copyText(event, text) {
+            event.preventDefault();
+            event.stopPropagation();
+            navigator.clipboard.writeText(text).then(() => {
+                showToast(`已复制: ${text}`);
+            }).catch(() => {
+                showToast('复制失败，请手动复制');
+            });
+        }
+
+        function toggleAutoRefresh() {
+            autoRefresh = !autoRefresh;
+            const btn = document.getElementById('auto-btn');
+            const icon = btn.querySelector('i');
+            
+            if(autoRefresh) {
+                icon.className = "fa-solid fa-pause";
+                checkAllNodes();
+            } else {
+                icon.className = "fa-solid fa-play";
+                clearTimeout(refreshTimer);
+                refreshIcon.classList.remove('fa-spin');
+                timerBar.style.width = '100%';
+            }
+        }
+
+        // ================= URL 自定义背景（仅 URL） =================
+        function sanitizeImageUrl(raw) {
+            if (!raw || typeof raw !== 'string') return null;
+            try {
+                const url = new URL(raw, window.location.origin);
+                if (!['http:', 'https:'].includes(url.protocol)) return null;
+                return url.href;
+            } catch {
+                return null;
+            }
+        }
+
+        function applyCustomBackgroundFromUrl() {
+            const safeUrl = sanitizeImageUrl(window.BG_IMAGE_URL || '');
+            const overlay = Number(window.BG_OVERLAY_OPACITY);
+
+            if (!Number.isNaN(overlay) && overlay >= 0 && overlay <= 1) {
+                document.documentElement.style.setProperty('--bg-overlay-opacity', String(overlay));
+            }
+
+            if (safeUrl) {
+                document.documentElement.style.setProperty('--custom-bg-image', `url("${safeUrl}")`);
+            }
+        }
+
+        window.onload = () => {
+            applyCustomBackgroundFromUrl();
+            initHtml();
+        };
+    </script>
+</body>
+</html>
